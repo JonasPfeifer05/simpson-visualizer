@@ -146,7 +146,13 @@ fn parse_factor(tokens: &mut Vec<Token>) -> Expression {
 
 #[tauri::command]
 fn y(x: Vec<f64>, expression: Expression) -> Vec<f64> {
-    x.iter().map(|x| expression.calc(*x)).collect()
+    let mut y = vec![];
+    for x in &x {
+        y.push(expression.calc(*x));
+    }
+    println!("{:?}", x);
+    println!("{:?}", y);
+    y
 }
 
 fn main() {

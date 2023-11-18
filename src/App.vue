@@ -127,6 +127,7 @@ async function renderGraph() {
 async function drawFunction(fromPixel: number, toPixel: number, yFunction: (x: number[]) => Promise<number[]>, style: string) {
   const joints: Point[] = [];
   let x = Array.from({ length: toPixel - fromPixel }, (_value, index) => pixelsToUnit(fromPixel + index))
+  console.log(x)
   let y: number[] = await yFunction(x);
   console.log(y)
   for (let i = 0; i < y.length; i++) {
