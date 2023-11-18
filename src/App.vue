@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import {onMounted, onUnmounted, Ref, ref, watch} from "vue";
+import {invoke} from "@tauri-apps/api";
 
 interface Point {
   x: number,
   y: number,
 }
 
-let renderInterval: NodeJS.Timeout|null = null;
+let renderInterval: NodeJS.Timeout | null = null;
 
 const canvas: Ref<HTMLCanvasElement | null> = ref(null);
 const context: Ref<CanvasRenderingContext2D | null> = ref(null);
@@ -28,6 +29,9 @@ const zoomOutFactor = 1.02;
 const simpsonStart = ref(1);
 const simpsonEnd = ref(5);
 const simpsonDivisions = ref(1);
+
+const functionString = ref("");
+let expression: unknown|null;
 
 //----------------------------------------------------
 // USER INPUT
@@ -80,6 +84,10 @@ watch([simpsonStart, simpsonEnd, simpsonDivisions], () => {
   rerender();
 })
 
+watch(functionString, async () => {
+  expression = await invoke("parse", {function: functionString.value});
+})
+
 //----------------------------------------------------
 // RENDERING
 //----------------------------------------------------
@@ -93,9 +101,9 @@ onUnmounted(() => {
   window.removeEventListener("resize", rerender);
 })
 
-function rerender() {
+async function rerender() {
   configureContext();
-  renderGraph();
+  await renderGraph();
 }
 
 function configureContext() {
@@ -106,22 +114,25 @@ function configureContext() {
   context.value!.lineCap = "round";
 }
 
-function renderGraph() {
+async function renderGraph() {
   clearContext();
   drawAxis();
   drawGrid();
 
-  drawFunction(-offsetValues.x, -offsetValues.x + canvas.value!.width, y, "white");
+  await drawFunction(-offsetValues.x, -offsetValues.x + canvas.value!.width, y, "white");
 
-  drawSimpson();
+  await drawSimpson();
 }
 
-function drawFunction(fromPixel: number, toPixel: number, y: (x: number) => number, style: string) {
+async function drawFunction(fromPixel: number, toPixel: number, yFunction: (x: number[]) => Promise<number[]>, style: string) {
   const joints: Point[] = [];
-  for (let x = fromPixel; x < toPixel; x++) {
+  let x = Array.from({ length: toPixel - fromPixel }, (_value, index) => pixelsToUnit(fromPixel + index))
+  let y: number[] = await yFunction(x);
+  console.log(y)
+  for (let i = 0; i < y.length; i++) {
     joints.push({
-      x,
-      y: unitsToPixels(y(pixelsToUnit(x)))
+      x: x[i],
+      y: y[i],
     })
   }
 
@@ -136,7 +147,7 @@ function drawFunction(fromPixel: number, toPixel: number, y: (x: number) => numb
   context.value!.closePath();
 }
 
-function drawSimpson() {
+async function drawSimpson() {
   function pixelToUnit(point: Point): Point {
     return {
       x: point.x / pixelsPerUnit,
@@ -152,12 +163,11 @@ function drawSimpson() {
   const simpsonEnds: Point[] = [];
 
 
-
   const simpsonPartLength = (simpsonEnd.value - simpsonStart.value) / (simpsonDivisions.value * 2)
   for (let i = 0; i < simpsonDivisions.value * 2 + 1; i++) {
     const simpsonX = simpsonStart.value + i * simpsonPartLength;
-    simpsonStarts.push({ x: unitsToPixels(simpsonX), y: 0 });
-    simpsonEnds.push({ x: unitsToPixels(simpsonX), y: unitsToPixels(y(simpsonX)) });
+    simpsonStarts.push({x: unitsToPixels(simpsonX), y: 0});
+    simpsonEnds.push({x: unitsToPixels(simpsonX), y: unitsToPixels((await y([simpsonX]))[0])});
 
   }
 
@@ -170,11 +180,9 @@ function drawSimpson() {
   context.value!.stroke();
   context.value!.closePath();
 
-  for (let i = 0; i + 2 < simpsonEnds.length; i+=2) {
-    drawFunction(simpsonEnds[i].x, simpsonEnds[i+2].x, getQuadraticFunction(pixelToUnit(simpsonEnds[i]), pixelToUnit(simpsonEnds[i+1]), pixelToUnit(simpsonEnds[i+2])), "rgba(144,238,144,0.5)")
+  for (let i = 0; i + 2 < simpsonEnds.length; i += 2) {
+    await drawFunction(simpsonEnds[i].x, simpsonEnds[i + 2].x, getQuadraticFunction(pixelToUnit(simpsonEnds[i]), pixelToUnit(simpsonEnds[i + 1]), pixelToUnit(simpsonEnds[i + 2])), "rgba(144,238,144,0.5)")
   }
-
-
 }
 
 function drawAxis() {
@@ -273,18 +281,25 @@ function clearContext() {
   context.value!.beginPath();
 }
 
-function y(x: number): number {
-  return Math.sin(x / 5) - Math.sin(x/ 2) + 2;
+async function y(x: number[]): Promise<number[]> {
+  console.log(x.length);
+  if (!expression || expression === "Invalid") return [];
+  return await invoke("y", {x, expression});
 }
 
 //----------------------------------------------------
 // UTIL
 //----------------------------------------------------
 
-function getQuadraticFunction(a: Point, b: Point, c: Point): (x: number) => number {
+function getQuadraticFunction(a: Point, b: Point, c: Point): (x: number[]) => Promise<number[]> {
   // Reference: https://math.stackexchange.com/a/2150310
-  return x => {
-    return (((x-b.x)*(x-c.x))/((a.x-b.x)*(a.x-c.x)))*a.y + (((x-a.x)*(x-c.x))/((b.x-a.x)*(b.x-c.x)))*b.y + (((x-b.x)*(x-a.x))/((c.x-b.x)*(c.x-a.x)))*c.y;
+  return async x => {
+    let yFunction = (x: number) => (((x - b.x) * (x - c.x)) / ((a.x - b.x) * (a.x - c.x))) * a.y + (((x - a.x) * (x - c.x)) / ((b.x - a.x) * (b.x - c.x))) * b.y + (((x - b.x) * (x - a.x)) / ((c.x - b.x) * (c.x - a.x))) * c.y;
+    let y = [];
+    for (let i = 0; i < x.length; i++) {
+      y.push(yFunction(x[i]))
+    }
+    return y;
   }
 }
 
@@ -318,21 +333,24 @@ function unitsToPixels(units: number): number {
 <template>
   <header id="header" class="d-flex justify-content-center align-items-center gap-3">
     <label class="h5 m-0">Function:</label>
-    <input id="function-input" type="text" class="form-control form-control-sm" placeholder="f(x) = ">
+    <input id="function-input" type="text" v-model="functionString" class="form-control form-control-sm" placeholder="f(x) = ">
   </header>
   <div id="menu" class="d-flex align-items-center justify-content-around">
     <div class="d-flex align-items-center gap-2 ">
       <label>Subdivisions: </label>
-      <input type="number" inputmode="numeric" v-model.number="simpsonDivisions" class="form-control form-control-sm option">
+      <input type="number" inputmode="numeric" v-model.number="simpsonDivisions"
+             class="form-control form-control-sm option">
     </div>
     <div class="d-flex gap-3">
       <div class="d-flex align-items-center gap-2 ">
         <label>From: </label>
-        <input type="number" inputmode="numeric" v-model.number="simpsonStart" class="form-control form-control-sm option">
+        <input type="number" inputmode="numeric" v-model.number="simpsonStart"
+               class="form-control form-control-sm option">
       </div>
       <div class="d-flex align-items-center gap-2 ">
         <label>To: </label>
-        <input type="number" inputmode="numeric" v-model.number="simpsonEnd" class="form-control form-control-sm option">
+        <input type="number" inputmode="numeric" v-model.number="simpsonEnd"
+               class="form-control form-control-sm option">
       </div>
     </div>
   </div>
