@@ -20,8 +20,6 @@ let offsetValues: Point = {x: 0, y: 0};
 
 const downscaleFactor = 2.0;
 
-let joints: Point[] = [];
-
 const moveFactor = 2.0;
 
 const zoomInFactor = 0.98;
@@ -73,6 +71,15 @@ function zoomGraph(e: WheelEvent) {
   rerender();
 }
 
+watch([simpsonStart, simpsonEnd, simpsonDivisions], () => {
+  simpsonDivisions.value = Math.trunc(simpsonDivisions.value);
+  if (simpsonDivisions.value <= 0) simpsonDivisions.value = 1;
+
+  if (simpsonStart.value > simpsonEnd.value) simpsonStart.value = simpsonEnd.value
+
+  rerender();
+})
+
 //----------------------------------------------------
 // RENDERING
 //----------------------------------------------------
@@ -84,10 +91,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener("resize", rerender);
-})
-
-watch([simpsonStart, simpsonEnd, simpsonDivisions], () => {
-  rerender();
 })
 
 function rerender() {
@@ -108,40 +111,70 @@ function renderGraph() {
   drawAxis();
   drawGrid();
 
-  calculateGraph();
+  drawFunction(-offsetValues.x, -offsetValues.x + canvas.value!.width, y, "white");
+
+  drawSimpson();
+}
+
+function drawFunction(fromPixel: number, toPixel: number, y: (x: number) => number, style: string) {
+  const joints: Point[] = [];
+  for (let x = fromPixel; x < toPixel; x++) {
+    joints.push({
+      x,
+      y: unitsToPixels(y(pixelsToUnit(x)))
+    })
+  }
 
   context.value!.beginPath();
   for (let i = 0; i < joints.length - 1; i++) {
     batchDrawLineFromTo(joints[i], joints[i + 1])
   }
-
-  context.value!.strokeStyle = "white"
+  context.value!.strokeStyle = style;
   context.value!.lineWidth = 3;
   context.value!.stroke();
 
   context.value!.closePath();
-
-  drawSimpson();
 }
 
 function drawSimpson() {
+  function pixelToUnit(point: Point): Point {
+    return {
+      x: point.x / pixelsPerUnit,
+      y: point.y / pixelsPerUnit,
+    }
+  }
+
   if (simpsonStart.value === 0 && simpsonEnd.value === 0) return;
 
   context.value!.beginPath();
 
-  const simpsonPartLength = (simpsonEnd.value - simpsonStart.value) / (simpsonDivisions.value + 1)
-  for (let i = 0; i < simpsonDivisions.value + 2; i++) {
-    const simpsonX = simpsonStart.value + i * simpsonPartLength;
-    let simpsonPartStart: Point = { x: unitsToPixels(simpsonX), y: 0 };
-    let simpsonPartEnd: Point = { x: unitsToPixels(simpsonX), y: unitsToPixels(y(simpsonX)) };
+  const simpsonStarts: Point[] = [];
+  const simpsonEnds: Point[] = [];
 
-    batchDrawLineFromTo(simpsonPartStart, simpsonPartEnd)
+
+
+  const simpsonPartLength = (simpsonEnd.value - simpsonStart.value) / (simpsonDivisions.value * 2)
+  for (let i = 0; i < simpsonDivisions.value * 2 + 1; i++) {
+    const simpsonX = simpsonStart.value + i * simpsonPartLength;
+    simpsonStarts.push({ x: unitsToPixels(simpsonX), y: 0 });
+    simpsonEnds.push({ x: unitsToPixels(simpsonX), y: unitsToPixels(y(simpsonX)) });
+
+  }
+
+  for (let i = 0; i < simpsonStarts.length; i++) {
+    batchDrawLineFromTo(simpsonStarts[i], simpsonEnds[i])
   }
 
   context.value!.lineWidth = 1;
   context.value!.strokeStyle = "rgba(144,238,144,0.5)"
   context.value!.stroke();
   context.value!.closePath();
+
+  for (let i = 0; i + 2 < simpsonEnds.length; i+=2) {
+    drawFunction(simpsonEnds[i].x, simpsonEnds[i+2].x, getQuadraticFunction(pixelToUnit(simpsonEnds[i]), pixelToUnit(simpsonEnds[i+1]), pixelToUnit(simpsonEnds[i+2])), "rgba(144,238,144,0.5)")
+  }
+
+
 }
 
 function drawAxis() {
@@ -225,17 +258,6 @@ function yEndPoint(): Point {
   return {x: offsetValues.x, y: 0};
 }
 
-function calculateGraph() {
-  joints = [];
-
-  for (let i = -offsetValues.x; i < -offsetValues.x + canvas.value!.width; i++) {
-    joints.push({
-      x: i,
-      y: unitsToPixels(y(pixelsToUnit(i))),
-    })
-  }
-}
-
 function batchDrawLineFromTo(from: Point, to: Point) {
   const correctFrom = offset(correctPointOrigin(from));
   const correctTo = offset(correctPointOrigin(to));
@@ -258,6 +280,13 @@ function y(x: number): number {
 //----------------------------------------------------
 // UTIL
 //----------------------------------------------------
+
+function getQuadraticFunction(a: Point, b: Point, c: Point): (x: number) => number {
+  // Reference: https://math.stackexchange.com/a/2150310
+  return x => {
+    return (((x-b.x)*(x-c.x))/((a.x-b.x)*(a.x-c.x)))*a.y + (((x-a.x)*(x-c.x))/((b.x-a.x)*(b.x-c.x)))*b.y + (((x-b.x)*(x-a.x))/((c.x-b.x)*(c.x-a.x)))*c.y;
+  }
+}
 
 function isOutsideView(point: Point): boolean {
   return point.x < 0 || point.y < 0 || point.x > canvas.value!.width || point.y > canvas.value!.height;
