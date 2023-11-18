@@ -40,13 +40,12 @@ let expression: unknown|null;
 function startDrag(e: MouseEvent) {
   lastMouse.x = e.x;
   lastMouse.y = e.y;
-  renderInterval = setInterval(rerender, 30);
+  renderInterval = setInterval(rerender, 20);
   dragging = true;
 }
 
 function stopDrag() {
   clearInterval(renderInterval!);
-  rerender();
   dragging = false;
 }
 
@@ -105,9 +104,11 @@ onUnmounted(() => {
 
 async function rerender() {
   if (rendering) return;
+  rendering = true;
   await prepareRender();
   configureContext();
   await renderGraph();
+  rendering = false;
 }
 
 function configureContext() {
@@ -121,7 +122,7 @@ function configureContext() {
 let joints: Point[] = [];
 async function prepareRender() {
   joints = [];
-  let xValues = Array.from({ length: canvas.value!.width }, (_value, index) => pixelsToUnit(-offsetValues.x + index))
+  let xValues = Array.from({ length: canvas.value!.clientWidth * downscaleFactor }, (_value, index) => pixelsToUnit(-offsetValues.x + index))
   let yValues: number[] = await y(xValues);
   for (let i = 0; i < yValues.length; i++) {
     joints.push({
@@ -134,7 +135,6 @@ async function prepareRender() {
 let rendering = false;
 
 async function renderGraph() {
-  rendering = true;
   clearContext();
   drawAxis();
   drawGrid();
@@ -142,7 +142,6 @@ async function renderGraph() {
   await drawFunctionPrepared(joints, "white");
 
   await drawSimpson();
-  rendering = false;
 }
 
 async function drawFunctionPrepared(joints: Point[], style: string) {
@@ -254,7 +253,7 @@ function drawGrid() {
   yEnd.x -= offsetX;
 
   context.value!.beginPath();
-  for (let i = 0; i < canvas.value!.height / pixelsPerUnit; i++) {
+  for (let i = 0; i < canvas.value!.clientHeight * downscaleFactor / pixelsPerUnit; i++) {
     const correctedXStart = correctPointOrigin(xStart);
     const correctedXEnd = correctPointOrigin(xEnd);
 
@@ -265,7 +264,7 @@ function drawGrid() {
     xEnd.y += unitsToPixels(1);
   }
 
-  for (let i = 0; i < canvas.value!.width / pixelsPerUnit; i++) {
+  for (let i = 0; i < canvas.value!.clientWidth * downscaleFactor / pixelsPerUnit; i++) {
     const correctedYStart = correctPointOrigin(yStart);
     const correctedYEnd = correctPointOrigin(yEnd);
 
@@ -287,11 +286,11 @@ function xStartPoint(): Point {
 }
 
 function xEndPoint(): Point {
-  return {x: canvas.value!.width, y: -offsetValues.y};
+  return {x: canvas.value!.clientWidth * downscaleFactor, y: -offsetValues.y};
 }
 
 function yStartPoint(): Point {
-  return {x: offsetValues.x, y: canvas.value!.height};
+  return {x: offsetValues.x, y: canvas.value!.clientHeight * downscaleFactor};
 }
 
 function yEndPoint(): Point {
@@ -309,7 +308,7 @@ function batchDrawLineFromTo(from: Point, to: Point) {
 }
 
 function clearContext() {
-  context.value!.clearRect(0, 0, canvas.value!.width, canvas.value!.height);
+  context.value!.clearRect(0, 0, canvas.value!.clientWidth * downscaleFactor, canvas.value!.clientHeight * downscaleFactor);
   context.value!.beginPath();
 }
 
@@ -335,13 +334,13 @@ function getQuadraticFunction(a: Point, b: Point, c: Point): (x: number[]) => Pr
 }
 
 function isOutsideView(point: Point): boolean {
-  return point.x < 0 || point.y < 0 || point.x > canvas.value!.width || point.y > canvas.value!.height;
+  return point.x < 0 || point.y < 0 || point.x > canvas.value!.clientWidth * downscaleFactor || point.y > canvas.value!.clientHeight * downscaleFactor;
 }
 
 function correctPointOrigin(point: Point): Point {
   return {
     x: point.x,
-    y: canvas.value!.height - point.y,
+    y: canvas.value!.clientHeight * downscaleFactor - point.y,
   }
 }
 

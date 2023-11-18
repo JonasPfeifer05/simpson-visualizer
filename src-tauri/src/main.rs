@@ -15,6 +15,8 @@ enum Expression {
     Number(f64),
     X,
     Operation(Box<Expression>, Operation, Box<Expression>),
+    Sin(Box<Expression>),
+    Cos(Box<Expression>),
 }
 
 impl Expression {
@@ -34,7 +36,15 @@ impl Expression {
                     Operation::Div => lhs / rhs,
                     Operation::Pow => lhs.powf(rhs),
                 }
-            }
+            },
+            Expression::Sin(lhs) => {
+                let lhs = lhs.calc(x);
+                lhs.sin()
+            },
+            Expression::Cos(lhs) => {
+                let lhs = lhs.calc(x);
+                lhs.cos()
+            },
         }
     }
 }
@@ -56,6 +66,7 @@ enum Token {
     Operation(Operation),
     BracketOpen,
     BracketClosed,
+    Ident(String),
 }
 
 #[tauri::command]
@@ -86,6 +97,13 @@ fn tokenize(mut function: Vec<char>) -> Vec<Token> {
                     number.push(function.remove(0));
                 }
                 Token::Number(number.parse().unwrap())
+            }
+            'a'..='z' => {
+                let mut ident = String::from(letter);
+                while let Some('a'..='z') = function.get(0) {
+                    ident.push(function.remove(0));
+                }
+                Token::Ident(ident)
             }
             _ => Token::Unknown,
         };
@@ -151,18 +169,26 @@ fn parse_single_value(tokens: &mut Vec<Token>) -> Expression {
             if let Some(Token::BracketClosed) = tokens.get(0) {  } else { return Expression::Invalid }
             tokens.remove(0);
             lhs
-        }
+        },
+        Token::Ident(ident) => {
+            if let Some(Token::BracketOpen) = tokens.get(0) {  } else { return Expression::Invalid }
+            tokens.remove(0);
+            let lhs = parse_term(tokens);
+            if let Some(Token::BracketClosed) = tokens.get(0) {  } else { return Expression::Invalid }
+            tokens.remove(0);
+            match ident.as_str() {
+                "sin" => Expression::Sin(Box::new(lhs)),
+                "cos" => Expression::Cos(Box::new(lhs)),
+                _ => Expression::Invalid,
+            }
+        },
         _ => Expression::Invalid,
     }
 }
 
 #[tauri::command]
 fn y(x: Vec<f64>, expression: Expression) -> Vec<f64> {
-    let mut y = vec![];
-    for x in &x {
-        y.push(expression.calc(*x));
-    }
-    y
+    x.into_iter().map(|x| expression.calc(x)).collect()
 }
 
 fn main() {
