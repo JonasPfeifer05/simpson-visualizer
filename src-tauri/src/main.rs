@@ -114,21 +114,12 @@ fn parse_term(tokens: &mut Vec<Token>) -> Expression {
 
 fn parse_factor(tokens: &mut Vec<Token>) -> Expression {
     if tokens.is_empty() { return Expression::Invalid }
-    let mut lhs = match tokens.remove(0) {
-        Token::X => Expression::X,
-        Token::Number(val) => Expression::Number(val),
-        Token::BracketOpen => {
-            let lhs = parse_term(tokens);
-            if let Some(Token::BracketClosed) = tokens.get(0) {  } else { return Expression::Invalid }
-            tokens.remove(0);
-            lhs
-        }
-        _ => return Expression::Invalid,
-    };
+    let mut lhs = parse_single_value(tokens);
+    if lhs == Expression::Invalid { return Expression::Invalid }
 
     loop {
         match tokens.get(0) {
-            Some(Token::Operation(Operation::Mul | Operation::Div | Operation::Pow)) => {
+            Some(Token::Operation(Operation::Mul | Operation::Div)) => {
                 let operation = match tokens.remove(0) {
                     Token::Operation(operation) => operation,
                     _ => unreachable!()
@@ -137,11 +128,32 @@ fn parse_factor(tokens: &mut Vec<Token>) -> Expression {
                 if rhs == Expression::Invalid { return Expression::Invalid }
                 lhs = Expression::Operation(Box::new(lhs), operation, Box::new(rhs));
             },
+            Some(Token::Operation(Operation::Pow)) => {
+                tokens.remove(0);
+                let rhs = parse_single_value(tokens);
+                if rhs == Expression::Invalid { return Expression::Invalid }
+                lhs = Expression::Operation(Box::new(lhs), Operation::Pow, Box::new(rhs));
+            }
             _ => break,
         }
     }
 
     lhs
+}
+
+fn parse_single_value(tokens: &mut Vec<Token>) -> Expression {
+    if tokens.is_empty() { return Expression::Invalid }
+    match tokens.remove(0) {
+        Token::X => Expression::X,
+        Token::Number(val) => Expression::Number(val),
+        Token::BracketOpen => {
+            let lhs = parse_term(tokens);
+            if let Some(Token::BracketClosed) = tokens.get(0) {  } else { return Expression::Invalid }
+            tokens.remove(0);
+            lhs
+        }
+        _ => Expression::Invalid,
+    }
 }
 
 #[tauri::command]
@@ -150,8 +162,6 @@ fn y(x: Vec<f64>, expression: Expression) -> Vec<f64> {
     for x in &x {
         y.push(expression.calc(*x));
     }
-    println!("{:?}", x);
-    println!("{:?}", y);
     y
 }
 

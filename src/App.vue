@@ -40,7 +40,7 @@ let expression: unknown|null;
 function startDrag(e: MouseEvent) {
   lastMouse.x = e.x;
   lastMouse.y = e.y;
-  renderInterval = setInterval(rerender, 10);
+  renderInterval = setInterval(rerender, 30);
   dragging = true;
 }
 
@@ -84,9 +84,11 @@ watch([simpsonStart, simpsonEnd, simpsonDivisions], () => {
   rerender();
 })
 
-watch(functionString, async () => {
+async function parse() {
   expression = await invoke("parse", {function: functionString.value});
-})
+  console.log(expression)
+  await rerender();
+}
 
 //----------------------------------------------------
 // RENDERING
@@ -102,6 +104,8 @@ onUnmounted(() => {
 })
 
 async function rerender() {
+  if (rendering) return;
+  await prepareRender();
   configureContext();
   await renderGraph();
 }
@@ -114,26 +118,53 @@ function configureContext() {
   context.value!.lineCap = "round";
 }
 
+let joints: Point[] = [];
+async function prepareRender() {
+  joints = [];
+  let xValues = Array.from({ length: canvas.value!.width }, (_value, index) => pixelsToUnit(-offsetValues.x + index))
+  let yValues: number[] = await y(xValues);
+  for (let i = 0; i < yValues.length; i++) {
+    joints.push({
+      x: unitsToPixels(xValues[i]),
+      y: unitsToPixels(yValues[i]),
+    })
+  }
+}
+
+let rendering = false;
+
 async function renderGraph() {
+  rendering = true;
   clearContext();
   drawAxis();
   drawGrid();
 
-  await drawFunction(-offsetValues.x, -offsetValues.x + canvas.value!.width, y, "white");
+  await drawFunctionPrepared(joints, "white");
 
   await drawSimpson();
+  rendering = false;
+}
+
+async function drawFunctionPrepared(joints: Point[], style: string) {
+  context.value!.beginPath();
+  for (let i = 0; i < joints.length - 1; i++) {
+    batchDrawLineFromTo(joints[i], joints[i + 1])
+  }
+  context.value!.strokeStyle = style;
+  context.value!.lineWidth = 3;
+  context.value!.stroke();
+
+  context.value!.closePath();
 }
 
 async function drawFunction(fromPixel: number, toPixel: number, yFunction: (x: number[]) => Promise<number[]>, style: string) {
   const joints: Point[] = [];
   let x = Array.from({ length: toPixel - fromPixel }, (_value, index) => pixelsToUnit(fromPixel + index))
-  console.log(x)
   let y: number[] = await yFunction(x);
-  console.log(y)
   for (let i = 0; i < y.length; i++) {
     joints.push({
-      x: x[i],
-      y: y[i],
+      x: unitsToPixels(x[i]),
+      y: unitsToPixels(y[i]),
     })
   }
 
@@ -164,9 +195,9 @@ async function drawSimpson() {
   const simpsonEnds: Point[] = [];
 
 
-  const simpsonPartLength = (simpsonEnd.value - simpsonStart.value) / (simpsonDivisions.value * 2)
+  const simpsonPartLength = (Number(simpsonEnd.value) - Number(simpsonStart.value)) / (Number(simpsonDivisions.value) * 2)
   for (let i = 0; i < simpsonDivisions.value * 2 + 1; i++) {
-    const simpsonX = simpsonStart.value + i * simpsonPartLength;
+    const simpsonX = Number(simpsonStart.value) + i * simpsonPartLength;
     simpsonStarts.push({x: unitsToPixels(simpsonX), y: 0});
     simpsonEnds.push({x: unitsToPixels(simpsonX), y: unitsToPixels((await y([simpsonX]))[0])});
 
@@ -283,7 +314,6 @@ function clearContext() {
 }
 
 async function y(x: number[]): Promise<number[]> {
-  console.log(x.length);
   if (!expression || expression === "Invalid") return [];
   return await invoke("y", {x, expression});
 }
@@ -334,7 +364,7 @@ function unitsToPixels(units: number): number {
 <template>
   <header id="header" class="d-flex justify-content-center align-items-center gap-3">
     <label class="h5 m-0">Function:</label>
-    <input id="function-input" type="text" v-model="functionString" class="form-control form-control-sm" placeholder="f(x) = ">
+    <input id="function-input" type="text" v-model="functionString" @keyup="parse" class="form-control form-control-sm" placeholder="f(x) = ">
   </header>
   <div id="menu" class="d-flex align-items-center justify-content-around">
     <div class="d-flex align-items-center gap-2 ">
